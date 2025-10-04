@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Taxi Management Portal</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Load Lucide Icons -->
+    <script type="module">
+      // Import all necessary icons once globally
+      import { createIcons, Home, Car, Users, DollarSign, Briefcase, ChevronRight, CheckCircle, XCircle } from 'https://cdn.jsdelivr.net/npm/lucide-esm@latest';
+      
+      // Store icons in a global object attached to window for easy access in later script blocks
+      window.lucideIcons = { Home, Car, Users, DollarSign, Briefcase, ChevronRight, CheckCircle, XCircle };
+      window.createIcons = createIcons;
+      
+      // Initialize icons on first load
+      window.createIcons(window.lucideIcons);
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Custom scrollbar for better aesthetics */
+        .dashboard-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        .dashboard-content::-webkit-scrollbar-thumb {
+            background-color: #a0aec0;
+            border-radius: 4px;
+        }
+        .dashboard-content::-webkit-scrollbar-track {
+            background: #f7f9fb;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- Main Container -->
+    <div id="app-container" class="w-full max-w-4xl bg-white shadow-2xl rounded-xl transition-all duration-500 ease-in-out">
+        <!-- Content will be injected here (Login or Dashboard) -->
+    </div>
+
+    <script>
+        // --- DATA AND STATE MANAGEMENT ---
+        const userRoles = {
+            "admin@taxico.com": "Admin",
+            "driver1@taxico.com": "Driver",
+            "acc@taxico.com": "Accountant",
+            "recept@taxico.com": "Receptionist"
+        };
+
+        let currentUser = null;
+        let currentRole = null;
+        let currentView = 'Home';
+        
+        // Helper function to create icons after content is injected
+        function reInitializeIcons() {
+             // Only run if the createIcons function is available (loaded via the module script)
+            if (window.createIcons && window.lucideIcons) {
+                // Call createIcons with the global set of icons to render new SVG elements
+                window.createIcons(window.lucideIcons);
+            }
+        }
+
+
+        // --- AUTHENTICATION/ROUTING FUNCTIONS ---
+
+        /**
+         * Renders the login form view.
+         */
+        function renderLogin() {
+            const container = document.getElementById('app-container');
+            container.classList.remove('max-w-4xl', 'min-h-[600px]');
+            container.classList.add('max-w-md', 'p-8');
+            
+            container.innerHTML = `
+                <div class="text-center mb-6">
+                    <i data-lucide="car" class="w-10 h-10 text-indigo-600 mx-auto mb-2"></i>
+                    <h1 class="text-3xl font-extrabold text-gray-900">Taxico Management Login</h1>
+                    <p class="text-sm text-gray-500 mt-2">Use one of the roles below to access the portal.</p>
+                </div>
+                
+                <form id="login-form" class="space-y-4">
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700">Email (User ID)</label>
+                        <input type="email" id="email" name="email" required placeholder="e.g., admin@taxico.com"
+                               class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
+                        <input type="password" id="password" name="password" required value="password"
+                               class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    </div>
+                    <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 ease-in-out">
+                        Log In
+                    </button>
+                </form>
+
+                <div class="mt-6 p-4 bg-indigo-50 rounded-lg text-sm">
+                    <p class="font-semibold text-indigo-800 mb-2">Test Accounts:</p>
+                    <ul class="list-disc list-inside space-y-1 text-indigo-700">
+                        <li>Admin: admin@taxico.com</li>
+                        <li>Driver: driver1@taxico.com</li>
+                        <li>Accountant: acc@taxico.com</li>
+                        <li>Receptionist: recept@taxico.com</li>
+                    </ul>
+                    <p class="mt-2 text-xs italic text-indigo-500">Password for all is 'password'.</p>
+                </div>
+            `;
+
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
+            
+            // Re-render Lucide icons after content is loaded
+            setTimeout(reInitializeIcons, 0);
+        }
+
+        /**
+         * Handles the login attempt.
+         * @param {Event} e - The form submission event.
+         */
+        function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            if (userRoles[email] && password === 'password') { // Simple hardcoded password check
+                currentUser = email;
+                currentRole = userRoles[email];
+                renderDashboard();
+            } else {
+                displayMessage('Invalid email or password.', 'error');
+            }
+        }
+
+        /**
+         * Handles logout.
+         */
+        function handleLogout() {
+            currentUser = null;
+            currentRole = null;
+            currentView = 'Home';
+            renderLogin();
+            displayMessage('You have been logged out.', 'success');
+        }
+
+        // --- DASHBOARD RENDERING AND NAVIGATION ---
+
+        /**
+         * Renders the main dashboard structure.
+         */
+        function renderDashboard() {
+            const container = document.getElementById('app-container');
+            container.classList.remove('max-w-md', 'p-8');
+            container.classList.add('max-w-4xl', 'min-h-[600px]');
+            
+            container.innerHTML = `
+                <div class="flex flex-col md:flex-row h-full">
+                    <!-- Sidebar -->
+                    <nav class="md:w-56 bg-indigo-800 text-white p-4 rounded-t-xl md:rounded-l-xl md:rounded-tr-none flex md:flex-col justify-between items-center md:items-stretch">
+                        <div class="flex flex-col items-start w-full">
+                            <h2 class="text-xl font-bold mb-6 text-indigo-200 hidden md:block">Taxico Portal</h2>
+                            <div class="text-sm font-medium mb-6 p-2 bg-indigo-700 rounded-lg w-full">
+                                <p>Role: ${currentRole}</p>
+                                <p class="truncate">${currentUser}</p>
+                            </div>
+                            <ul id="nav-menu" class="flex md:flex-col space-x-4 md:space-x-0 md:space-y-2 overflow-x-auto pb-2 md:pb-0 w-full">
+                                ${generateNavItems()}
+                            </ul>
+                        </div>
+                        <button id="logout-btn" class="w-full mt-4 md:mt-auto py-2 px-4 text-sm font-medium rounded-md bg-indigo-600 hover:bg-indigo-500 transition duration-150 ease-in-out self-end">
+                            Log Out
+                        </button>
+                    </nav>
+
+                    <!-- Main Content Area -->
+                    <main class="flex-1 p-6 md:p-8 overflow-y-auto h-full dashboard-content">
+                        <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">${currentView} Dashboard</h1>
+                        <div id="dashboard-view-content">
+                            <!-- Specific view content will be injected here -->
+                        </div>
+                    </main>
+                </div>
+            `;
+
+            document.getElementById('logout-btn').addEventListener('click', handleLogout);
+            document.getElementById('nav-menu').addEventListener('click', handleNavigation);
+
+            // Initial view load
+            loadView(currentView);
+
+             // Re-render Lucide icons after content is loaded
+            setTimeout(reInitializeIcons, 0);
+        }
+
+        /**
+         * Generates navigation items based on the user's role.
+         */
+        function generateNavItems() {
+            const navMap = {
+                'Home': { icon: 'Home', roles: ['Admin', 'Driver', 'Accountant', 'Receptionist'] },
+                'Admin': { icon: 'Users', roles: ['Admin'], label: 'User & Vehicle Mgmt' },
+                'Driver': { icon: 'Car', roles: ['Driver'], label: 'Trip & Expense Mgmt' },
+                'Accountant': { icon: 'DollarSign', roles: ['Accountant'], label: 'Financial Reports' },
+                'Receptionist': { icon: 'Briefcase', roles: ['Receptionist'], label: 'Customer Service' }
+            };
+
+            let html = '';
+            for (const view in navMap) {
+                if (navMap[view].roles.includes(currentRole)) {
+                    const isActive = view === currentView ? 'bg-indigo-700' : 'hover:bg-indigo-700/50';
+                    const label = navMap[view].label || view;
+
+                    html += `
+                        <li>
+                            <a href="#" data-view="${view}" class="flex items-center space-x-3 p-2 rounded-md ${isActive} transition duration-150 ease-in-out">
+                                <i data-lucide="${navMap[view].icon}" class="w-5 h-5"></i>
+                                <span class="text-sm">${label}</span>
+                            </a>
+                        </li>
+                    `;
+                }
+            }
+            return html;
+        }
+
+        /**
+         * Handles click events for the sidebar navigation.
+         * @param {Event} e - The click event.
+         */
+        function handleNavigation(e) {
+            e.preventDefault();
+            const target = e.target.closest('a');
+            if (target && target.dataset.view) {
+                currentView = target.dataset.view;
+                renderDashboard(); // Re-render to update active state
+            }
+        }
+
+        /**
+         * Loads content into the main dashboard area based on the current view.
+         * @param {string} viewName - The name of the view to load.
+         */
+        function loadView(viewName) {
+            const contentArea = document.getElementById('dashboard-view-content');
+            let content = '';
+
+            // Helper function to create dashboard cards
+            const createCard = (title, icon, items) => `
+                <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                    <div class="flex items-center text-indigo-600 mb-4">
+                        <i data-lucide="${icon}" class="w-6 h-6 mr-3"></i>
+                        <h3 class="text-xl font-semibold">${title}</h3>
+                    </div>
+                    <ul class="space-y-3">
+                        ${items.map(item => `<li class="flex items-start text-gray-700 text-sm"><i data-lucide="chevron-right" class="w-4 h-4 text-indigo-500 mt-1 flex-shrink-0 mr-2"></i> ${item}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+
+            if (viewName === 'Home') {
+                content = `
+                    <div class="space-y-8">
+                        <div class="p-6 bg-indigo-50 border-l-4 border-indigo-500 rounded-lg shadow-md">
+                            <p class="text-lg text-indigo-800">Welcome, **${currentRole}**! Your portal provides access to core management functions based on your role in the system.</p>
+                        </div>
+                        <h2 class="text-2xl font-semibold text-gray-700">Role-Specific Functions</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            ${createCard('Admin', 'Users', ['Add/Update/Remove Employees', 'Manage Taxi Fleet Details', 'View All Reports (Profit, Income, Expense)'])}
+                            ${createCard('Driver', 'Car', ['Update Daily Status', 'Log Ride Start/End Mileage', 'Add Fuel & Other Expenses', 'Update Trip Details'])}
+                            ${createCard('Accountant', 'DollarSign', ['Generate Daily/Monthly/Annual Reports', 'View and Analyze Profit/Loss', 'Calculate Salaries and Bonuses'])}
+                            ${createCard('Receptionist', 'Briefcase', ['View Customer Details', 'Handle Emergency Alerts', 'Gather and Respond to Customer Feedback'])}
+                        </div>
+                    </div>
+                `;
+            } else if (viewName === 'Admin') {
+                content = `
+                    <p class="text-gray-600 mb-6">As an **Admin**, you manage all core personnel and vehicle assets.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${createCard('Employee Management', 'Users', ['Add/Update Employee', 'Restore/Remove Employee', 'View Employee Status'])}
+                        ${createCard('Vehicle Management', 'Car', ['Add/Update Taxi', 'System Test/Routine Maintenance', 'View Taxi Details'])}
+                    </div>
+                    <div class="mt-8">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Quick Actions</h3>
+                        <div class="flex flex-wrap gap-4">
+                            <button class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 shadow-md transition">Add New Taxi</button>
+                            <button class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 shadow-md transition">Update Driver Info</button>
+                        </div>
+                    </div>
+                `;
+            } else if (viewName === 'Driver') {
+                content = `
+                    <p class="text-gray-600 mb-6">As a **Driver**, you manage all trip and operational data.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${createCard('Trip Logging', 'ChevronRight', ['Start Ride (Log Mileage/Time)', 'End Ride (Log Mileage/Fare)', 'Get Ride/Update on Road Status'])}
+                        ${createCard('Expenses & Status', 'CheckCircle', ['Add Fuel Expenses', 'Add Other Expenses (Tolls, Maintenance)', 'Update Daily Status'])}
+                    </div>
+                    <div class="mt-8">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Operational Dashboard</h3>
+                        <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
+                            <p class="text-yellow-800 font-medium">Daily Distance Traveled: 145 km</p>
+                            <p class="text-yellow-800">Current Vehicle: TX-401 (Status: Active)</p>
+                        </div>
+                    </div>
+                `;
+            } else if (viewName === 'Accountant') {
+                content = `
+                    <p class="text-gray-600 mb-6">As an **Accountant**, your focus is on financial reporting and payroll.</p>
+                    <div class="grid grid-cols-1 gap-6">
+                        ${createCard('Financial Reports', 'DollarSign', ['View Each Taxi Income (Daily/Monthly/Annually)', 'View Each Taxi Expense (Daily/Monthly/Annually)', 'View Each Taxi Profit (Daily/Monthly/Annually)'])}
+                        ${createCard('Payroll & Bonuses', 'Briefcase', ['Calculate Salaries & Overtime', 'Add Bonuses'])}
+                    </div>
+                    <div class="mt-8">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Report Generation</h3>
+                        <div class="flex flex-wrap gap-4">
+                            <button class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 shadow-md transition">Generate Monthly P/L</button>
+                            <button class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 shadow-md transition">Calculate All Salaries</button>
+                        </div>
+                    </div>
+                `;
+            } else if (viewName === 'Receptionist') {
+                content = `
+                    <p class="text-gray-600 mb-6">As a **Receptionist**, you manage customer interaction and emergency response.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${createCard('Customer Service', 'Users', ['View Customer Details', 'Gather Customer Feedback', 'Send Response to Feedback'])}
+                        ${createCard('Safety & Alerts', 'XCircle', ['View Emergency Alerts', 'Respond to Alerts'])}
+                    </div>
+                    <div class="mt-8">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Pending Feedback</h3>
+                        <ul class="space-y-3 p-4 bg-red-50 rounded-lg border border-red-200">
+                            <li class="text-sm text-red-800">Feedback ID 405: Driver was late.</li>
+                            <li class="text-sm text-red-800">Feedback ID 406: Missing item in car.</li>
+                        </ul>
+                    </div>
+                `;
+            }
+
+            contentArea.innerHTML = content;
+
+             // Re-render Lucide icons after content is loaded
+            setTimeout(reInitializeIcons, 0);
+        }
+
+        /**
+         * Displays a temporary notification message (since alerts are disallowed).
+         * @param {string} message - The message content.
+         * @param {string} type - 'success' or 'error'.
+         */
+        function displayMessage(message, type) {
+            let msgContainer = document.getElementById('message-container');
+            if (!msgContainer) {
+                msgContainer = document.createElement('div');
+                msgContainer.id = 'message-container';
+                msgContainer.className = 'fixed top-4 right-4 z-50 transition-opacity duration-300';
+                document.body.appendChild(msgContainer);
+            }
+
+            const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+            const icon = type === 'success' ? 'CheckCircle' : 'XCircle';
+
+            const toast = document.createElement('div');
+            toast.className = `${bgColor} text-white p-4 rounded-lg shadow-xl flex items-center space-x-3 transform transition-all duration-300 translate-x-full opacity-0`;
+            toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span>${message}</span>`;
+            
+            msgContainer.appendChild(toast);
+            
+            // Re-render Lucide icons
+            reInitializeIcons();
+
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full', 'opacity-0');
+                toast.classList.add('translate-x-0', 'opacity-100');
+            }, 50);
+
+            // Animate out and remove
+            setTimeout(() => {
+                toast.classList.remove('translate-x-0', 'opacity-100');
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            renderLogin();
+        };
+
+    </script>
+</body>
+</html>
