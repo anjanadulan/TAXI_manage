@@ -7,18 +7,7 @@
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <!-- Load Lucide Icons -->
-    <script type="module">
-      // Import all necessary icons once globally
-      import { createIcons, Home, Car, Users, DollarSign, Briefcase, ChevronRight, CheckCircle, XCircle } from 'https://cdn.jsdelivr.net/npm/lucide-esm@latest';
-      
-      // Store icons in a global object attached to window for easy access in later script blocks
-      window.lucideIcons = { Home, Car, Users, DollarSign, Briefcase, ChevronRight, CheckCircle, XCircle };
-      window.createIcons = createIcons;
-      
-      // Initialize icons on first load
-      window.createIcons(window.lucideIcons);
-    </script>
+    
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -41,11 +30,24 @@
 
     <!-- Main Container -->
     <div id="app-container" class="w-full max-w-4xl bg-white shadow-2xl rounded-xl transition-all duration-500 ease-in-out">
-        <!-- Content will be injected here (Login or Dashboard) -->
+        <div id="loading-screen" class="p-8 text-center text-gray-500">Loading application...</div>
     </div>
 
-    <script>
-        // --- DATA AND STATE MANAGEMENT ---
+    <!-- MAIN APPLICATION LOGIC (TYPE=MODULE Ensures Imports are Ready) -->
+    <script type="module">
+        // --- LUCIDE ICONS SETUP ---
+        import { createIcons, Home, Car, Users, DollarSign, Briefcase, ChevronRight, CheckCircle, XCircle } from 'https://cdn.jsdelivr.net/npm/lucide-esm@latest';
+        window.lucideIcons = { Home, Car, Users, DollarSign, Briefcase, ChevronRight, CheckCircle, XCircle };
+        window.createIcons = createIcons;
+        
+        // --- FIREBASE IMPORTS ---
+        // These functions are now available directly in the module scope
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+
+        // --- GLOBAL STATE AND FIREBASE SETUP ---
         const userRoles = {
             "admin@taxico.com": "Admin",
             "driver1@taxico.com": "Driver",
@@ -56,6 +58,167 @@
         let currentUser = null;
         let currentRole = null;
         let currentView = 'Home';
+
+        // Firebase State
+        let app;
+        let db;
+        let auth;
+        let userId = 'loading';
+        let appId = 'default-app-id';
+        let isAuthReady = false;
+        let taxis = []; // Global state for taxi data
+
+        // --- FIREBASE UTILITY FUNCTIONS ---
+
+        /**
+         * Initializes Firebase and handles user authentication.
+         */
+        async function initializeFirebase() {
+            try {
+                // setLogLevel('Debug'); // Uncomment for debugging Firestore
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                if (!firebaseConfig) {
+                    console.error("Firebase config not found.");
+                    document.getElementById('loading-screen').textContent = "Error: Firebase configuration missing.";
+                    return;
+                }
+
+                // FIXED: Direct use of imported functions (initializeApp, getAuth, getFirestore)
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Attempt to sign in with custom token or anonymously
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // Listen for authentication state changes
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Authenticated with user ID:", userId);
+                        // Start the taxi data listener once authenticated
+                        if (!isAuthReady) {
+                             setupTaxiListener();
+                        }
+                    } else {
+                        userId = 'anonymous'; // Fallback ID if sign-in fails
+                    }
+                    isAuthReady = true;
+                    // Proceed to login screen if not already authenticated
+                    if (!currentUser) {
+                        renderLogin();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                document.getElementById('loading-screen').textContent = `Error: Firebase initialization failed. ${error.message}`;
+                isAuthReady = true;
+                // Render login even if storage is static as a fallback
+                renderLogin();
+            }
+        }
+
+        /**
+         * Defines the public collection path for shared data.
+         * @param {string} collectionName - Name of the collection (e.g., 'taxis').
+         * @returns {string} The full Firestore path.
+         */
+        function getCollectionPath(collectionName) {
+            return `artifacts/${appId}/public/data/${collectionName}`;
+        }
+
+        /**
+         * Fetches taxi data from Firestore in real-time.
+         */
+        function setupTaxiListener() {
+            if (!db || !isAuthReady) return;
+
+            const path = getCollectionPath('taxis');
+            // FIXED: Direct use of imported functions (query, collection, onSnapshot)
+            const taxisQuery = query(collection(db, path));
+            
+            onSnapshot(taxisQuery, (snapshot) => {
+                taxis = [];
+                snapshot.forEach((doc) => {
+                    taxis.push({ id: doc.id, ...doc.data() });
+                });
+                
+                // If the user is logged in, re-render the dashboard content to show new data
+                if (currentRole) {
+                    loadView(currentView);
+                }
+            }, (error) => {
+                console.error("Error setting up taxi listener: ", error);
+                displayMessage("Failed to load taxi data.", 'error');
+            });
+        }
+        
+        /**
+         * Saves a new taxi document to Firestore.
+         */
+        async function saveTaxi(taxiData) {
+            if (!db || !isAuthReady) {
+                displayMessage("System not ready or not authenticated.", 'error');
+                return false;
+            }
+            try {
+                const path = getCollectionPath('taxis');
+                // FIXED: Direct use of imported functions (doc, collection, setDoc)
+                const newDocRef = doc(collection(db, path));
+                
+                await setDoc(newDocRef, {
+                    ...taxiData,
+                    status: 'Available', // Default status
+                    createdAt: Date.now(),
+                    createdBy: userId,
+                });
+                displayMessage(`Taxi ${taxiData.licensePlate} added successfully!`, 'success');
+                return true;
+            } catch (error) {
+                console.error("Error adding taxi: ", error);
+                displayMessage(`Failed to add taxi: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        /**
+         * Saves a new ride document to Firestore.
+         */
+        async function saveRide(rideData) {
+            if (!db || !isAuthReady) {
+                displayMessage("System not ready or not authenticated.", 'error');
+                return false;
+            }
+            try {
+                const path = getCollectionPath('rides');
+                // FIXED: Direct use of imported functions (doc, collection, setDoc)
+                const newDocRef = doc(collection(db, path));
+                
+                await setDoc(newDocRef, {
+                    ...rideData,
+                    driverId: userId,
+                    driverEmail: currentUser,
+                    loggedAt: Date.now(),
+                });
+                displayMessage(`Trip logged successfully! Fare: $${rideData.fare.toFixed(2)}`, 'success');
+                return true;
+            } catch (error) {
+                console.error("Error logging trip: ", error);
+                displayMessage(`Failed to log trip: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+
+        // --- UI UTILITY FUNCTIONS ---
         
         // Helper function to create icons after content is injected
         function reInitializeIcons() {
@@ -66,6 +229,42 @@
             }
         }
 
+        /**
+         * Displays a temporary notification message (since alerts are disallowed).
+         */
+        function displayMessage(message, type) {
+            let msgContainer = document.getElementById('message-container');
+            if (!msgContainer) {
+                msgContainer = document.createElement('div');
+                msgContainer.id = 'message-container';
+                msgContainer.className = 'fixed top-4 right-4 z-50 transition-opacity duration-300 space-y-2';
+                document.body.appendChild(msgContainer);
+            }
+
+            const bgColor = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+            const icon = type === 'success' ? 'CheckCircle' : 'XCircle';
+
+            const toast = document.createElement('div');
+            toast.className = `${bgColor} text-white p-4 rounded-lg shadow-xl flex items-center space-x-3 transform transition-all duration-300 translate-x-full opacity-0 max-w-sm`;
+            toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span>${message}</span>`;
+            
+            msgContainer.prepend(toast); // Prepend so new messages appear at the top
+            
+            reInitializeIcons();
+
+            // Animate in
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full', 'opacity-0');
+                toast.classList.add('translate-x-0', 'opacity-100');
+            }, 50);
+
+            // Animate out and remove
+            setTimeout(() => {
+                toast.classList.remove('translate-x-0', 'opacity-100');
+                toast.classList.add('translate-x-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        }
 
         // --- AUTHENTICATION/ROUTING FUNCTIONS ---
 
@@ -73,6 +272,10 @@
          * Renders the login form view.
          */
         function renderLogin() {
+            // Remove the loading screen if it exists
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) loadingScreen.remove();
+
             const container = document.getElementById('app-container');
             container.classList.remove('max-w-4xl', 'min-h-[600px]');
             container.classList.add('max-w-md', 'p-8');
@@ -101,26 +304,23 @@
                 </form>
 
                 <div class="mt-6 p-4 bg-indigo-50 rounded-lg text-sm">
-                    <p class="font-semibold text-indigo-800 mb-2">Test Accounts:</p>
+                    <p class="font-semibold text-indigo-800 mb-2">Test Accounts (Password: 'password'):</p>
                     <ul class="list-disc list-inside space-y-1 text-indigo-700">
                         <li>Admin: admin@taxico.com</li>
                         <li>Driver: driver1@taxico.com</li>
                         <li>Accountant: acc@taxico.com</li>
                         <li>Receptionist: recept@taxico.com</li>
                     </ul>
-                    <p class="mt-2 text-xs italic text-indigo-500">Password for all is 'password'.</p>
                 </div>
             `;
 
             document.getElementById('login-form').addEventListener('submit', handleLogin);
             
-            // Re-render Lucide icons after content is loaded
             setTimeout(reInitializeIcons, 0);
         }
 
         /**
          * Handles the login attempt.
-         * @param {Event} e - The form submission event.
          */
         function handleLogin(e) {
             e.preventDefault();
@@ -153,6 +353,8 @@
          * Renders the main dashboard structure.
          */
         function renderDashboard() {
+            if (!isAuthReady) return; // Wait for Firebase auth
+
             const container = document.getElementById('app-container');
             container.classList.remove('max-w-md', 'p-8');
             container.classList.add('max-w-4xl', 'min-h-[600px]');
@@ -165,7 +367,7 @@
                             <h2 class="text-xl font-bold mb-6 text-indigo-200 hidden md:block">Taxico Portal</h2>
                             <div class="text-sm font-medium mb-6 p-2 bg-indigo-700 rounded-lg w-full">
                                 <p>Role: ${currentRole}</p>
-                                <p class="truncate">${currentUser}</p>
+                                <p class="truncate text-xs text-indigo-300">User ID: ${userId}</p>
                             </div>
                             <ul id="nav-menu" class="flex md:flex-col space-x-4 md:space-x-0 md:space-y-2 overflow-x-auto pb-2 md:pb-0 w-full">
                                 ${generateNavItems()}
@@ -192,12 +394,11 @@
             // Initial view load
             loadView(currentView);
 
-             // Re-render Lucide icons after content is loaded
             setTimeout(reInitializeIcons, 0);
         }
 
         /**
-         * Generates navigation items based on the user's role.
+         * Generates navigation items based on the user's role. (Unchanged)
          */
         function generateNavItems() {
             const navMap = {
@@ -228,8 +429,7 @@
         }
 
         /**
-         * Handles click events for the sidebar navigation.
-         * @param {Event} e - The click event.
+         * Handles click events for the sidebar navigation. (Unchanged)
          */
         function handleNavigation(e) {
             e.preventDefault();
@@ -240,15 +440,96 @@
             }
         }
 
+        // --- FORM HANDLERS ---
+
+        /**
+         * Handles the form submission for adding a new taxi.
+         */
+        async function handleAddTaxi(e) {
+            e.preventDefault();
+            const licensePlate = document.getElementById('license-plate').value.trim().toUpperCase();
+            const model = document.getElementById('model').value.trim();
+            const mileage = parseInt(document.getElementById('mileage').value, 10);
+            const buttonText = document.getElementById('add-taxi-btn-text');
+            
+            if (taxis.some(taxi => taxi.licensePlate === licensePlate)) {
+                displayMessage('A taxi with this license plate already exists.', 'error');
+                return;
+            }
+            if (mileage < 0) {
+                 displayMessage('Mileage cannot be negative.', 'error');
+                 return;
+            }
+
+            buttonText.textContent = 'Saving...';
+            
+            const success = await saveTaxi({ licensePlate, model, mileage });
+
+            buttonText.textContent = 'Add Taxi';
+            
+            if (success) {
+                // Clear form fields
+                document.getElementById('license-plate').value = '';
+                document.getElementById('model').value = '';
+                document.getElementById('mileage').value = '';
+            }
+        }
+
+        /**
+         * Handles the form submission for logging a new trip (for Driver).
+         */
+        async function handleLogTrip(e) {
+            e.preventDefault();
+            const taxiId = document.getElementById('taxi-select').value;
+            const startMileage = parseInt(document.getElementById('start-mileage').value, 10);
+            const endMileage = parseInt(document.getElementById('end-mileage').value, 10);
+            const fareCollected = parseFloat(document.getElementById('fare-collected').value);
+            const buttonText = document.getElementById('log-trip-btn-text');
+
+            if (endMileage <= startMileage) {
+                displayMessage('End mileage must be greater than start mileage.', 'error');
+                return;
+            }
+            
+            const selectedTaxi = taxis.find(t => t.id === taxiId);
+            if (!selectedTaxi) {
+                 displayMessage('Selected taxi not found.', 'error');
+                 return;
+            }
+
+            buttonText.textContent = 'Saving...';
+            
+            const success = await saveRide({
+                taxiId: taxiId,
+                licensePlate: selectedTaxi.licensePlate,
+                startMileage: startMileage,
+                endMileage: endMileage,
+                distance: endMileage - startMileage,
+                fare: fareCollected,
+            });
+
+            buttonText.textContent = 'Log Trip';
+
+            if (success) {
+                // Clear form fields
+                document.getElementById('start-mileage').value = '';
+                document.getElementById('end-mileage').value = '';
+                document.getElementById('fare-collected').value = '';
+                document.getElementById('taxi-select').value = '';
+            }
+        }
+
+
+        // --- VIEW LOADER ---
+        
         /**
          * Loads content into the main dashboard area based on the current view.
-         * @param {string} viewName - The name of the view to load.
          */
         function loadView(viewName) {
             const contentArea = document.getElementById('dashboard-view-content');
             let content = '';
 
-            // Helper function to create dashboard cards
+            // Helper function to create dashboard cards (Unchanged)
             const createCard = (title, icon, items) => `
                 <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
                     <div class="flex items-center text-indigo-600 mb-4">
@@ -279,33 +560,130 @@
             } else if (viewName === 'Admin') {
                 content = `
                     <p class="text-gray-600 mb-6">As an **Admin**, you manage all core personnel and vehicle assets.</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                        <!-- Card 1: Employee Management (Placeholder) -->
                         ${createCard('Employee Management', 'Users', ['Add/Update Employee', 'Restore/Remove Employee', 'View Employee Status'])}
-                        ${createCard('Vehicle Management', 'Car', ['Add/Update Taxi', 'System Test/Routine Maintenance', 'View Taxi Details'])}
-                    </div>
-                    <div class="mt-8">
-                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Quick Actions</h3>
-                        <div class="flex flex-wrap gap-4">
-                            <button class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 shadow-md transition">Add New Taxi</button>
-                            <button class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 shadow-md transition">Update Driver Info</button>
+                        
+                        <!-- Card 2: Vehicle Management - Add Form -->
+                        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                            <div class="flex items-center text-indigo-600 mb-4">
+                                <i data-lucide="Car" class="w-6 h-6 mr-3"></i>
+                                <h3 class="text-xl font-semibold">Add New Taxi</h3>
+                            </div>
+                            <form id="add-taxi-form" class="space-y-3">
+                                <div>
+                                    <input type="text" id="license-plate" placeholder="License Plate (e.g., TX-101)" required
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <input type="text" id="model" placeholder="Car Model (e.g., Toyota Camry)" required
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <input type="number" id="mileage" placeholder="Current Mileage (km)" required min="0"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <button type="submit" class="w-full py-2 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 transition shadow-md">
+                                    <span id="add-taxi-btn-text">Add Taxi</span>
+                                </button>
+                            </form>
                         </div>
                     </div>
+                    
+                    <!-- Taxi List (Real-time data display) -->
+                    <h3 class="text-2xl font-semibold text-gray-700 mb-4 border-t pt-6">Current Taxi Fleet (${taxis.length})</h3>
+                    ${taxis.length === 0 ? 
+                        '<p class="text-gray-500 italic">No taxis found. Add a taxi using the form above.</p>' :
+                        `<div class="space-y-3">
+                            ${taxis.map(taxi => `
+                                <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg shadow-sm border border-gray-100">
+                                    <div class="font-medium">
+                                        ${taxi.licensePlate} <span class="text-gray-500 text-sm">(${taxi.model})</span>
+                                    </div>
+                                    <div class="flex items-center space-x-4">
+                                        <span class="text-sm text-indigo-600">${taxi.mileage.toLocaleString()} km</span>
+                                        <span class="text-xs font-semibold px-2 py-1 rounded-full ${taxi.status === 'Available' ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}">${taxi.status}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>`
+                    }
                 `;
+                
+                // Bind form listener after content is loaded
+                setTimeout(() => {
+                    const form = document.getElementById('add-taxi-form');
+                    if (form) {
+                        form.addEventListener('submit', handleAddTaxi);
+                    }
+                }, 0);
+
             } else if (viewName === 'Driver') {
+                const availableTaxis = taxis.filter(t => t.status === 'Available');
+                const isTaxiAvailable = availableTaxis.length > 0;
+
                 content = `
                     <p class="text-gray-600 mb-6">As a **Driver**, you manage all trip and operational data.</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        ${createCard('Trip Logging', 'ChevronRight', ['Start Ride (Log Mileage/Time)', 'End Ride (Log Mileage/Fare)', 'Get Ride/Update on Road Status'])}
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                        <!-- Card 1: Trip Logging - Form -->
+                        <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                            <div class="flex items-center text-indigo-600 mb-4">
+                                <i data-lucide="ChevronRight" class="w-6 h-6 mr-3"></i>
+                                <h3 class="text-xl font-semibold">Log New Trip</h3>
+                            </div>
+                            <form id="log-trip-form" class="space-y-3">
+                                <div>
+                                    <select id="taxi-select" required ${!isTaxiAvailable ? 'disabled' : ''}
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                                        <option value="" disabled selected>${isTaxiAvailable ? 'Select Assigned Taxi' : 'No Taxis Available'}</option>
+                                        ${availableTaxis.map(t => 
+                                            `<option value="${t.id}">${t.licensePlate} (${t.model})</option>`
+                                        ).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <input type="number" id="start-mileage" placeholder="Start Mileage (km)" required min="0"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <input type="number" id="end-mileage" placeholder="End Mileage (km)" required min="0"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <input type="number" id="fare-collected" placeholder="Fare Collected ($)" required min="0" step="0.01"
+                                           class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                                </div>
+                                <button type="submit" ${!isTaxiAvailable ? 'disabled' : ''} 
+                                        class="w-full py-2 px-4 text-white rounded-md transition shadow-md ${!isTaxiAvailable ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}">
+                                    <span id="log-trip-btn-text">Log Trip</span>
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Card 2: Expenses & Status (Placeholder) -->
                         ${createCard('Expenses & Status', 'CheckCircle', ['Add Fuel Expenses', 'Add Other Expenses (Tolls, Maintenance)', 'Update Daily Status'])}
                     </div>
+                    
                     <div class="mt-8">
-                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Operational Dashboard</h3>
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Operational Summary</h3>
                         <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                            <p class="text-yellow-800 font-medium">Daily Distance Traveled: 145 km</p>
-                            <p class="text-yellow-800">Current Vehicle: TX-401 (Status: Active)</p>
+                            <p class="text-yellow-800 font-medium">Driver: ${currentUser}</p>
+                            <p class="text-yellow-800 text-sm">Authenticated User ID: ${userId}</p>
+                            <p class="text-yellow-800">Available Taxis in Fleet: ${availableTaxis.length}</p>
                         </div>
                     </div>
                 `;
+                
+                // Bind form listener after content is loaded
+                setTimeout(() => {
+                    const form = document.getElementById('log-trip-form');
+                    if (form) {
+                        form.addEventListener('submit', handleLogTrip);
+                    }
+                }, 0);
+
             } else if (viewName === 'Accountant') {
                 content = `
                     <p class="text-gray-600 mb-6">As an **Accountant**, your focus is on financial reporting and payroll.</p>
@@ -314,8 +692,9 @@
                         ${createCard('Payroll & Bonuses', 'Briefcase', ['Calculate Salaries & Overtime', 'Add Bonuses'])}
                     </div>
                     <div class="mt-8">
-                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Report Generation</h3>
-                        <div class="flex flex-wrap gap-4">
+                        <h3 class="text-xl font-semibold text-gray-700 mb-4">Report Generation (Data is persistent now!)</h3>
+                        <p class="text-gray-500">The application now saves Taxi and Ride data to Firestore, enabling the foundation for these reports.</p>
+                        <div class="flex flex-wrap gap-4 mt-4">
                             <button class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 shadow-md transition">Generate Monthly P/L</button>
                             <button class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 shadow-md transition">Calculate All Salaries</button>
                         </div>
@@ -339,55 +718,12 @@
             }
 
             contentArea.innerHTML = content;
-
-             // Re-render Lucide icons after content is loaded
             setTimeout(reInitializeIcons, 0);
         }
 
-        /**
-         * Displays a temporary notification message (since alerts are disallowed).
-         * @param {string} message - The message content.
-         * @param {string} type - 'success' or 'error'.
-         */
-        function displayMessage(message, type) {
-            let msgContainer = document.getElementById('message-container');
-            if (!msgContainer) {
-                msgContainer = document.createElement('div');
-                msgContainer.id = 'message-container';
-                msgContainer.className = 'fixed top-4 right-4 z-50 transition-opacity duration-300';
-                document.body.appendChild(msgContainer);
-            }
-
-            const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
-            const icon = type === 'success' ? 'CheckCircle' : 'XCircle';
-
-            const toast = document.createElement('div');
-            toast.className = `${bgColor} text-white p-4 rounded-lg shadow-xl flex items-center space-x-3 transform transition-all duration-300 translate-x-full opacity-0`;
-            toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span>${message}</span>`;
-            
-            msgContainer.appendChild(toast);
-            
-            // Re-render Lucide icons
-            reInitializeIcons();
-
-            // Animate in
-            setTimeout(() => {
-                toast.classList.remove('translate-x-full', 'opacity-0');
-                toast.classList.add('translate-x-0', 'opacity-100');
-            }, 50);
-
-            // Animate out and remove
-            setTimeout(() => {
-                toast.classList.remove('translate-x-0', 'opacity-100');
-                toast.classList.add('translate-x-full', 'opacity-0');
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        }
-
         // --- INITIALIZATION ---
-        window.onload = () => {
-            renderLogin();
-        };
+        // Start the application after the module script has loaded all dependencies.
+        initializeFirebase();
 
     </script>
 </body>
